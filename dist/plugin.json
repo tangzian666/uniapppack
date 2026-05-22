@@ -1,6 +1,6 @@
 {
   "main": "index.html",
-  "logo": "logo.png",
+  "logo": "logo.jpg",
   "preload": "preload.js",
   "name": "uniapp-pack-helper",
   "pluginName": "uni-app打包助手",

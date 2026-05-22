@@ -54,6 +54,15 @@ const png = Buffer.concat([
   chunk('IEND', Buffer.alloc(0))
 ])
 
-const out = path.join(__dirname, '..', 'public', 'logo.png')
+const publicDir = path.join(__dirname, '..', 'public')
+const hasCustom = ['logo.png', 'logo.jpg', 'logo.jpeg', 'logo.webp'].some((name) =>
+  fs.existsSync(path.join(publicDir, name))
+)
+if (hasCustom) {
+  console.log('logo skipped: custom logo already exists in public/')
+  process.exit(0)
+}
+
+const out = path.join(publicDir, 'logo.png')
 fs.writeFileSync(out, png)
 console.log('logo written:', out)

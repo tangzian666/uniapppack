@@ -1,6 +1,6 @@
 {
   "main": "dist/index.html",
-  "logo": "public/logo.png",
+  "logo": "public/logo.jpg",
   "preload": "preload/preload.js",
   "name": "uniapp-pack-helper",
   "pluginName": "uni-app打包助手",

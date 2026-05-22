@@ -32,6 +32,22 @@ npm run build
 
 勿导入 `public\plugin.json`，否则 preload 不会加载。
 
+## 插件图标（logo）
+
+支持 **PNG / JPG** 等常见格式：
+
+1. 将图片放到 `public/logo.jpg`（或 `logo.png`）
+2. 修改 `public/plugin.json` 中 `"logo"` 为对应文件名，例如：
+
+   ```json
+   "logo": "logo.jpg"
+   ```
+
+3. 执行 `npm run build`（会复制到 `dist/`）
+4. 在 uTools 重新加载插件
+
+若 `public/` 下已有自定义 logo，构建时**不会**再用脚本覆盖。
+
 ## 使用前准备
 
 1. 安装 [HBuilderX](https://www.dcloud.io/hbuilderx.html)

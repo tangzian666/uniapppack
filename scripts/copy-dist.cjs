@@ -13,7 +13,30 @@ const publicDir = path.join(root, 'public')
 const preloadDir = path.join(root, 'preload')
 
 copyFile(path.join(publicDir, 'plugin.json'), path.join(dist, 'plugin.json'))
-copyFile(path.join(publicDir, 'logo.png'), path.join(dist, 'logo.png'))
+
+const pluginJson = JSON.parse(fs.readFileSync(path.join(publicDir, 'plugin.json'), 'utf8'))
+const logoCandidates = [
+  pluginJson.logo,
+  'logo.png',
+  'logo.jpg',
+  'logo.jpeg',
+  'logo.webp'
+].filter(Boolean)
+const logoName = logoCandidates.find((name) => fs.existsSync(path.join(publicDir, name)))
+if (!logoName) {
+  throw new Error(
+    `Logo file not found in public/. Set "logo" in plugin.json to logo.jpg or logo.png`
+  )
+}
+if (pluginJson.logo !== logoName) {
+  pluginJson.logo = logoName
+  fs.writeFileSync(
+    path.join(publicDir, 'plugin.json'),
+    JSON.stringify(pluginJson, null, 2) + '\n',
+    'utf8'
+  )
+}
+copyFile(path.join(publicDir, logoName), path.join(dist, logoName))
 for (const name of fs.readdirSync(preloadDir)) {
   if (name.endsWith('.js')) {
     copyFile(path.join(preloadDir, name), path.join(dist, name))
