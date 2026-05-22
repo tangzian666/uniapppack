@@ -19,6 +19,9 @@ for (const name of fs.readdirSync(preloadDir)) {
     copyFile(path.join(preloadDir, name), path.join(dist, name))
   }
 }
+if (!fs.existsSync(path.join(dist, 'keystore-util.js'))) {
+  throw new Error('preload copy failed: keystore-util.js missing')
+}
 
 fs.writeFileSync(
   path.join(dist, 'package.json'),

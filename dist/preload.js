@@ -15,6 +15,7 @@ const path = require('path')
 const { spawn } = require('child_process')
 const os = require('os')
 const offline = require('./offline-android.js')
+const keystoreUtil = require('./keystore-util.js')
 
 const STORAGE_KEY = 'uniapp_pack_data_v1'
 let exposeMode = 'unknown'
@@ -76,6 +77,25 @@ function findProjectRoot(manifestPath) {
   return path.dirname(path.resolve(manifestPath))
 }
 
+function normalizeAppkey(value) {
+  return String(value || '').trim().replace(/\s+/g, '')
+}
+
+function validateAppkey(project) {
+  const key = normalizeAppkey(project.dcloudAppkey || project.appkey)
+  if (!key) {
+    throw new Error(
+      'dcloud appkey is empty. Open https://dev.dcloud.net.cn -> your app -> get Android appkey, fill in Project config, Save, then rebuild APK.'
+    )
+  }
+  if (!/^[a-f0-9]{32}$/i.test(key)) {
+    throw new Error(
+      `appkey format looks invalid: "${key}". It should be 32 hex characters from DCloud developer center (no spaces).`
+    )
+  }
+  return key
+}
+
 function parseManifest(manifestPath) {
   const root = findProjectRoot(manifestPath)
   const manifest = readJson(manifestPath)
@@ -85,10 +105,11 @@ function parseManifest(manifestPath) {
     path.basename(root)
   const android = manifest['app-plus']?.distribute?.android || {}
   const packagename = android.packagename || android.package || ''
-  const appkey =
+  const appkey = normalizeAppkey(
     manifest['app-plus']?.distribute?.sdkConfigs?.dcloud?.appkey ||
-    manifest['app-plus']?.distribute?.android?.dcloud_appkey ||
-    ''
+      manifest['app-plus']?.distribute?.android?.dcloud_appkey ||
+      ''
+  )
   return {
     id: appid || root,
     appid,
@@ -374,7 +395,7 @@ function addProjectFromManifest(manifestPath) {
           ...parsed,
           androidSdkPath:
             store.env.uniappOfflineSdkPath || store.env.androidSdkPath || '',
-          dcloudAppkey: parsed.appkey || '',
+          dcloudAppkey: normalizeAppkey(parsed.appkey) || '',
           certAlias: '',
           certFile: '',
           certPassword: '',
@@ -490,7 +511,59 @@ function createServices() {
 
   saveProject(projectId, patch) {
     const store = loadStore()
-    return mergeProjectConfig(store, projectId, patch)
+    const normalized = { ...patch }
+    if ('dcloudAppkey' in normalized) {
+      normalized.dcloudAppkey = normalizeAppkey(normalized.dcloudAppkey)
+    }
+    return mergeProjectConfig(store, projectId, normalized)
+  },
+
+  syncNativeProjectConfig(projectId) {
+    const store = loadStore()
+    const project = store.projects.find((p) => p.id === projectId)
+    if (!project) throw new Error('Project not found')
+    const nativeRoot = offline.getNativeProjectDir(project.path)
+    const gradlew = path.join(
+      nativeRoot,
+      process.platform === 'win32' ? 'gradlew.bat' : 'gradlew'
+    )
+    if (!fs.existsSync(gradlew)) {
+      return { synced: false, reason: 'native project not generated' }
+    }
+    offline.applyNativeConfig(nativeRoot, project, normalizeEnv(store.env))
+    return { synced: true, nativeRoot }
+  },
+
+  async inspectKeystoreFile(keystorePath, passwords) {
+    const store = loadStore()
+    return keystoreUtil.inspectKeystore(
+      path.resolve(keystorePath),
+      normalizeEnv(store.env),
+      passwords || {}
+    )
+  },
+
+  async applyCertFile(projectId, filePath, passwords) {
+    const store = loadStore()
+    const project = store.projects.find((p) => p.id === projectId)
+    if (!project) throw new Error('Project not found')
+    const resolved = path.resolve(filePath)
+    if (!keystoreUtil.isKeystoreFile(resolved)) {
+      throw new Error('Please use .keystore, .jks, .p12 or .pfx file')
+    }
+
+    const info = await keystoreUtil.inspectKeystore(resolved, normalizeEnv(store.env), {
+      storePassword: passwords?.storePassword || project.storePassword,
+      certPassword: passwords?.certPassword || project.certPassword
+    })
+
+    const patch = { certFile: resolved }
+    if (info.ok && info.alias) {
+      patch.certAlias = info.alias
+    }
+
+    mergeProjectConfig(store, projectId, patch)
+    return { ...info, certFile: resolved }
   },
 
   selectFile(filters) {
@@ -659,6 +732,36 @@ function createServices() {
     return dir
   },
 
+  getLatestApkPath(projectPath, buildType = 'debug') {
+    const nativeRoot = offline.getNativeProjectDir(projectPath)
+    return offline.findApkOutput(nativeRoot, buildType) || ''
+  },
+
+  async adbInstallApk(projectId, buildType, onLog) {
+    const store = loadStore()
+    const project = store.projects.find((p) => p.id === projectId)
+    if (!project) throw new Error('Project not found')
+    const apk = this.getLatestApkPath(project.path, buildType)
+    if (!apk || !fs.existsSync(apk)) {
+      throw new Error(`APK not found. Build ${buildType} package first.`)
+    }
+    const adb = process.platform === 'win32' ? 'adb.exe' : 'adb'
+    onLog && onLog(`> adb install -r "${apk}"\n`)
+    const result = await runCommand(adb, ['install', '-r', apk], { onData: onLog })
+    return { ...result, apk }
+  },
+
+  async adbUninstallApp(projectId, onLog) {
+    const store = loadStore()
+    const project = store.projects.find((p) => p.id === projectId)
+    if (!project) throw new Error('Project not found')
+    const pkg =
+      project.packagename || `uni.app.${(project.appid || '').replace(/__/g, '')}`
+    const adb = process.platform === 'win32' ? 'adb.exe' : 'adb'
+    onLog && onLog(`> adb uninstall ${pkg}\n`)
+    return runCommand(adb, ['uninstall', pkg], { onData: onLog })
+  },
+
   inspectOffline(projectId) {
     const store = loadStore()
     const project = store.projects.find((p) => p.id === projectId)
@@ -705,6 +808,11 @@ function createServices() {
     return { build, sync }
   },
 
+  getApkOutputDir(projectPath, buildType = 'debug') {
+    const nativeRoot = offline.getNativeProjectDir(projectPath)
+    return offline.getApkOutputDir(nativeRoot, buildType)
+  },
+
   async offlineGradlePack(projectId, options, onLog) {
     const store = loadStore()
     const project = store.projects.find((p) => p.id === projectId)
@@ -712,6 +820,19 @@ function createServices() {
     const env = normalizeEnv(store.env)
     const buildType = options?.buildType === 'release' ? 'release' : 'debug'
     const nativeRoot = offline.getNativeProjectDir(project.path)
+
+    const appkey = validateAppkey(project)
+    project.dcloudAppkey = appkey
+    mergeProjectConfig(store, projectId, { dcloudAppkey: appkey })
+    if (fs.existsSync(path.join(nativeRoot, process.platform === 'win32' ? 'gradlew.bat' : 'gradlew'))) {
+      offline.applyNativeConfig(nativeRoot, project, env)
+      onLog && onLog(`[appkey] ${appkey}\n`)
+    }
+
+    if (buildType === 'release') {
+      offline.validateReleaseSigning(project)
+      onLog && onLog('[release] Signing config OK\n')
+    }
 
     if (!options?.skipSync) {
       onLog && onLog('[1/3] Sync app resources to native project...\n')
@@ -740,18 +861,38 @@ function createServices() {
     })
 
     const apkPath = offline.findApkOutput(nativeRoot, buildType)
+    let publishPath = ''
+    if (result.code === 0 && buildType === 'release' && apkPath) {
+      publishPath = offline.publishReleaseApk(project.path, apkPath) || ''
+      if (publishPath) {
+        onLog && onLog(`[release] Published copy: ${publishPath}\n`)
+      }
+    }
     onLog &&
       onLog(
         `\n[3/3] Build finished (exit ${result.code})\n` +
-          (apkPath ? `APK dir: ${apkPath}\n` : 'Check simpleDemo/build/outputs/apk/\n')
+          (apkPath ? `APK: ${apkPath}\n` : 'Check simpleDemo/build/outputs/apk/\n') +
+          (buildType === 'release' && result.code === 0
+            ? '\nRelease APK is for distribution / store upload (not HBuilderX debug base).\n'
+            : '')
       )
-    return { ...result, apkPath, nativeRoot, buildType }
+    return { ...result, apkPath, publishPath, nativeRoot, buildType }
   },
 
   async cloudPack(projectId, onLog) {
     const store = loadStore()
     const project = store.projects.find((p) => p.id === projectId)
     if (!project) throw new Error('Project not found')
+
+    const appkey = validateAppkey(project)
+    project.dcloudAppkey = appkey
+    mergeProjectConfig(store, projectId, { dcloudAppkey: appkey })
+    try {
+      this.writeManifestAppkey(project)
+      onLog && onLog(`[appkey] ${appkey}\n`)
+    } catch (e) {
+      onLog && onLog(`[warn] manifest appkey write: ${e.message}\n`)
+    }
 
     const config = buildPackConfig(project, store)
     const configPath = path.join(
@@ -783,7 +924,9 @@ function createServices() {
     if (!manifest['app-plus'].distribute.sdkConfigs.dcloud) {
       manifest['app-plus'].distribute.sdkConfigs.dcloud = {}
     }
-    manifest['app-plus'].distribute.sdkConfigs.dcloud.appkey = project.dcloudAppkey || ''
+    manifest['app-plus'].distribute.sdkConfigs.dcloud.appkey = normalizeAppkey(
+      project.dcloudAppkey || project.appkey
+    )
     if (project.packagename) {
       if (!manifest['app-plus'].distribute.android) {
         manifest['app-plus'].distribute.android = {}

@@ -165,6 +165,17 @@ function inspectOfflineProject(project, env) {
       hint: androidSdkPath
         ? ''
         : 'Configure Android SDK in Environment (e.g. C:\\Users\\...\\AppData\\Local\\Android\\Sdk), not the uni-app offline SDK zip folder.'
+    },
+    releaseApk: {
+      ok: fs.existsSync(getReleaseApkPublishPath(projectPath)),
+      path: getReleaseApkPublishPath(projectPath)
+    },
+    signing: {
+      ok: !!(project.certFile && project.certAlias && project.certPassword),
+      hint:
+        project.certFile && project.certAlias && project.certPassword
+          ? ''
+          : 'Release build needs keystore, alias and password in Project config'
     }
   }
 }
@@ -207,14 +218,19 @@ function patchDcloudControl(nativeRoot, appid) {
   fs.writeFileSync(file, xml, 'utf8')
 }
 
+function normalizeAppkey(value) {
+  return String(value || '').trim().replace(/\s+/g, '')
+}
+
 function patchAndroidManifest(nativeRoot, appkey) {
   const file = path.join(nativeRoot, 'simpleDemo', 'src', 'main', 'AndroidManifest.xml')
   if (!fs.existsSync(file)) return
+  const key = normalizeAppkey(appkey)
   let xml = fs.readFileSync(file, 'utf8')
-  if (appkey) {
+  if (key) {
     xml = xml.replace(
       /android:name="dcloud_appkey"[^>]*android:value="[^"]*"/,
-      `android:name="dcloud_appkey" android:value="${escapeXml(appkey)}"`
+      `android:name="dcloud_appkey" android:value="${escapeXml(key)}"`
     )
   }
   fs.writeFileSync(file, xml, 'utf8')
@@ -265,7 +281,49 @@ function patchBuildGradle(nativeRoot, project) {
     gradle = gradle.replace(/signingConfigs\s*\{[\s\S]*?\n    \}/, signingBlock)
   }
 
+  if (project.versionCode) {
+    const code = String(project.versionCode).replace(/\D/g, '') || '1'
+    if (/versionCode\s+/.test(gradle)) {
+      gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${code}`)
+    }
+  }
+  if (project.versionName) {
+    const ver = escapeGradleString(project.versionName)
+    if (/versionName\s+/.test(gradle)) {
+      gradle = gradle.replace(/versionName\s+"[^"]*"/, `versionName "${ver}"`)
+    }
+  }
+
   fs.writeFileSync(file, gradle, 'utf8')
+}
+
+function validateReleaseSigning(project) {
+  const missing = []
+  if (!project.certFile || !fs.existsSync(project.certFile)) missing.push('keystore (.jks/.keystore)')
+  if (!project.certAlias) missing.push('certificate alias')
+  if (!project.certPassword) missing.push('certificate password')
+  if (missing.length) {
+    throw new Error(
+      `Release build requires signing config in Project settings: ${missing.join(', ')}. Debug builds can use the template test certificate.`
+    )
+  }
+}
+
+function getReleaseApkPublishPath(projectPath) {
+  return path.join(projectPath, 'unpackage', 'release', 'android_release.apk')
+}
+
+function publishReleaseApk(projectPath, apkSource) {
+  if (!apkSource || !fs.existsSync(apkSource)) return null
+  const dest = getReleaseApkPublishPath(projectPath)
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  fs.copyFileSync(apkSource, dest)
+  return dest
+}
+
+function getApkOutputDir(nativeRoot, buildType) {
+  const variant = buildType === 'release' ? 'release' : 'debug'
+  return path.join(nativeRoot, 'simpleDemo', 'build', 'outputs', 'apk', variant)
 }
 
 function syncWwwToNative(nativeRoot, wwwDir, appid) {
@@ -290,7 +348,7 @@ function syncWwwToNative(nativeRoot, wwwDir, appid) {
 function applyNativeConfig(nativeRoot, project, env) {
   if (!project.appid) throw new Error('AppID is empty; import manifest.json first')
   patchDcloudControl(nativeRoot, project.appid)
-  patchAndroidManifest(nativeRoot, project.dcloudAppkey || project.appkey || '')
+  patchAndroidManifest(nativeRoot, project.dcloudAppkey || project.appkey)
   patchStringsXml(nativeRoot, project.name || '')
   patchBuildGradle(nativeRoot, project)
   writeLocalProperties(nativeRoot, resolveAndroidSdkPath(env) || '')
@@ -430,5 +488,9 @@ module.exports = {
   resolveAndroidSdkPath,
   isValidAndroidSdkDir,
   getCustomDebugBasePath,
-  installCustomDebugBase
+  installCustomDebugBase,
+  validateReleaseSigning,
+  publishReleaseApk,
+  getReleaseApkPublishPath,
+  getApkOutputDir
 }

@@ -34,8 +34,8 @@
 1. 环境：Java、Android SDK、uni-app 离线 SDK（含 HBuilder-Integrate-AS）
 2. 本地打包 → **生成 Android 工程**（输出到 `项目/native/android`）
 3. **同步 app 资源**（CLI 编译 + 拷贝 www 到原生工程）
-4. 选择 debug/release → **开始打包**（Gradle assemble）
-5. APK：`native/android/simpleDemo/build/outputs/apk/`
+4. **打调试包** → `apk/debug/simpleDemo-debug.apk`；**打正式包** → `apk/release/` + 副本 `unpackage/release/android_release.apk`
+5. 正式包需在项目配置填写 keystore / 别名 / 密码
 
 ## 你机器上的推荐路径（来自参考工具截图）
 

@@ -2,8 +2,8 @@
   --bg: #f4f6f8;
   --card: #fff;
   --border: #e4e8ec;
-  --primary: #2f7cf6;
-  --primary-hover: #1a6ae8;
+  --primary: #409eff;
+  --primary-hover: #66b1ff;
   --text: #1f2933;
   --muted: #6b7785;
   --danger: #e34d59;
@@ -358,35 +358,233 @@ textarea {
   color: #b45309;
 }
 
-.pack-ops {
-  margin-bottom: 12px;
-  font-size: 13px;
-}
-
-.mode-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  margin-top: 8px;
-}
-
-.mode-row label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-}
-
-.inline-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .btn-sm {
   padding: 4px 10px;
   font-size: 12px;
+}
+
+.block-title {
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.check-card {
+  padding: 14px 16px;
+}
+
+.check-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.check-tags .tag {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: #f5f7fa;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.check-tags .tag.ok {
+  background: #f0f9eb;
+  color: #67c23a;
+  border-color: #e1f3d8;
+}
+
+.check-tags .tag.warn {
+  background: #fdf6ec;
+  color: #e6a23c;
+  border-color: #faecd8;
+}
+
+.link-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: center;
+}
+
+.link-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 13px;
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.link-btn:hover:not(:disabled) {
+  color: var(--primary-hover);
+  text-decoration: underline;
+}
+
+.link-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pack-card {
+  padding: 16px 18px 14px;
+}
+
+.pack-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.pack-row.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.pack-label {
+  color: var(--text);
+  min-width: 96px;
+  flex-shrink: 0;
+}
+
+.pack-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--text);
+  user-select: none;
+}
+
+.pack-option input {
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.pack-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f2f5;
+}
+
+.pack-android-label {
+  font-size: 14px;
+  color: var(--text);
+  margin-right: 4px;
+}
+
+.pack-vdivider {
+  width: 1px;
+  height: 22px;
+  background: #dcdfe6;
+  margin: 0 4px;
+}
+
+.btn-outline {
+  border: 1px solid var(--primary);
+  background: #fff;
+  color: var(--primary);
+  border-radius: 4px;
+  padding: 7px 14px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: #ecf5ff;
+}
+
+.btn-outline:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-solid {
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 4px;
+  padding: 8px 18px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.btn-solid:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.btn-solid:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pack-extra {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.pack-extra input {
+  accent-color: var(--primary);
+}
+
+.pack-tip {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.cert-drop {
+  grid-column: 2;
+  border: 1px dashed #c0c4cc;
+  border-radius: 6px;
+  padding: 12px 10px;
+  background: #fafbfc;
+  cursor: pointer;
+  min-height: 52px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.cert-drop:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: #ecf5ff;
+}
+
+.cert-drop-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cert-drop-path {
+  font-size: 11px;
+  word-break: break-all;
+  color: var(--muted);
+}
+
+.cert-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #67c23a;
 }
 
 .empty {

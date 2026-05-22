@@ -104,8 +104,18 @@ const busy = ref(false)
 const dropHint = ref('')
 const offlineCheck = ref(null)
 const offlineBuildMode = ref('debug')
+const offlineSyncBeforePack = ref(true)
 const logEl = ref(null)
 const logExpanded = ref(false)
+const certHint = ref('')
+
+const CHANNEL_OPTIONS = [
+  { id: 'google', label: 'GooglePlay' },
+  { id: 'huawei', label: '华为' },
+  { id: 'xiaomi', label: '小米' },
+  { id: 'oppo', label: 'OPPO' },
+  { id: 'vivo', label: 'VIVO' }
+]
 
 const selected = computed(() => projects.value.find((p) => p.id === selectedId.value) || null)
 
@@ -242,12 +252,22 @@ async function saveProject() {
   if (!selected.value) return
   busy.value = true
   try {
-    requireApi().saveProject(selectedId.value, { ...selected.value })
+    const patch = { ...selected.value }
+    if (patch.dcloudAppkey) {
+      patch.dcloudAppkey = patch.dcloudAppkey.trim().replace(/\s+/g, '')
+    }
+    requireApi().saveProject(selectedId.value, patch)
     try {
-      requireApi().writeManifestAppkey(selected.value)
-      appendLog('\n[ok] manifest.json updated\n')
+      requireApi().writeManifestAppkey({ ...selected.value, ...patch })
+      appendLog('\n[ok] manifest.json appkey updated\n')
     } catch (err) {
       appendLog(`\n[warn] manifest write skipped: ${err.message}\n`)
+    }
+    try {
+      const sync = requireApi().syncNativeProjectConfig(selectedId.value)
+      if (sync.synced) appendLog('[ok] AndroidManifest.xml appkey synced\n')
+    } catch (err) {
+      appendLog(`[warn] native sync skipped: ${err.message}\n`)
     }
     await refresh()
   } finally {
@@ -339,18 +359,87 @@ async function syncOffline() {
   }
 }
 
-async function startOfflinePack() {
+function isChannelOn(id) {
+  if (!selected.value) return false
+  const raw = (selected.value.channels || '').toLowerCase()
+  return raw.split(/[,，\s]+/).includes(id)
+}
+
+function toggleChannel(id) {
+  if (offlineBuildMode.value !== 'release') return
+  const set = new Set(
+    (selected.value.channels || '')
+      .split(/[,，\s]+/)
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+  )
+  if (set.has(id)) set.delete(id)
+  else set.add(id)
+  updateField('channels', [...set].join(','))
+}
+
+function viewAndroidSignature() {
   if (!selected.value) return
+  const p = selected.value
+  const lines = [
+    `证书类型: ${p.androidPackType === '0' ? '自有证书' : p.androidPackType}`,
+    `别名: ${p.certAlias || '(未填)'}`,
+    `keystore: ${p.certFile || '(未填)'}`,
+    `证书密码: ${p.certPassword ? '***' : '(未填)'}`,
+    `库密码: ${p.storePassword || p.certPassword || '(未填)'}`
+  ]
+  alert(lines.join('\n'))
+}
+
+async function uninstallAndInstall() {
+  if (!selected.value) return
+  busy.value = true
+  logText.value = ''
+  try {
+    appendLog('[adb] uninstall...\n')
+    await requireApi().adbUninstallApp(selectedId.value, appendLog)
+    appendLog('\n[adb] install...\n')
+    const r = await requireApi().adbInstallApk(
+      selectedId.value,
+      offlineBuildMode.value,
+      appendLog
+    )
+    appendLog(`\nexit: ${r.code}\n`)
+  } catch (e) {
+    appendLog(`\nError: ${e.message}\n`)
+  } finally {
+    busy.value = false
+  }
+}
+
+function startPack() {
+  startOfflinePack(offlineBuildMode.value)
+}
+
+async function startOfflinePack(buildType) {
+  if (!selected.value) return
+  const mode = buildType || offlineBuildMode.value
+  if (mode === 'release') {
+    const p = selected.value
+    if (!p.certFile || !p.certAlias || !p.certPassword) {
+      alert('正式包需在「项目配置」填写 keystore、别名、证书密码并保存')
+      subTab.value = 'config'
+      return
+    }
+    if (!confirm('将打 release 正式包（assembleRelease），用于上架/分发，是否继续？')) return
+  }
+  offlineBuildMode.value = mode
   busy.value = true
   logText.value = ''
   try {
     const r = await requireApi().offlineGradlePack(
       selectedId.value,
-      { buildType: offlineBuildMode.value },
+      { buildType: mode, skipSync: !offlineSyncBeforePack.value },
       appendLog
     )
     appendLog(`\nexit: ${r.code}\n`)
     if (r.apkPath) appendLog(`APK: ${r.apkPath}\n`)
+    if (r.publishPath) appendLog(`正式包副本: ${r.publishPath}\n`)
     await refreshOfflineCheck()
   } catch (e) {
     appendLog(`\nError: ${e.message}\n`)
@@ -366,10 +455,12 @@ function openNativeDir() {
 
 function openApkDir() {
   if (!selected.value) return
-  openFolder(
-    requireApi().getNativeProjectDir(selected.value.path) +
-      '\\simpleDemo\\build\\outputs\\apk\\debug'
-  )
+  openFolder(requireApi().getApkOutputDir(selected.value.path, offlineBuildMode.value))
+}
+
+function openReleasePublishDir() {
+  if (!selected.value) return
+  openFolder(selected.value.path + '\\unpackage\\release')
 }
 
 async function installHxBase() {
@@ -467,9 +558,57 @@ function openOutputDir() {
   openFolder(requireApi().getOutputDir(selected.value.path))
 }
 
+function onCertDragOver(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+
+async function applyCertPath(filePath) {
+  if (!selected.value || !filePath) return
+  certHint.value = ''
+  try {
+    const info = await requireApi().applyCertFile(selectedId.value, filePath, {
+      storePassword: selected.value.storePassword,
+      certPassword: selected.value.certPassword
+    })
+    await refresh()
+    certHint.value = info.message || ''
+  } catch (e) {
+    certHint.value = e.message
+  }
+}
+
+async function onCertDrop(e) {
+  e.preventDefault()
+  e.stopPropagation()
+  const files = e.dataTransfer?.files
+  if (!files?.length) return
+  const p = requireApi().getPathFromFile(files[0])
+  if (p) await applyCertPath(p)
+  else certHint.value = 'Cannot read dropped file path'
+}
+
 function browseCert() {
-  const file = requireApi().selectFile([{ name: 'keystore', extensions: ['keystore', 'jks', 'key'] }])
-  if (file) updateField('certFile', file)
+  const file = requireApi().selectFile([
+    { name: 'keystore', extensions: ['keystore', 'jks', 'p12', 'pfx'] }
+  ])
+  if (file) applyCertPath(file)
+}
+
+async function readCertMeta() {
+  if (!selected.value?.certFile) {
+    certHint.value = 'Import keystore file first'
+    return
+  }
+  await applyCertPath(selected.value.certFile)
+}
+
+function certFileName() {
+  const p = selected.value?.certFile
+  if (!p) return ''
+  const parts = p.replace(/\\/g, '/').split('/')
+  return parts[parts.length - 1]
 }
 
 function openFolder(p) {
@@ -653,6 +792,7 @@ onMounted(async () => {
             <label>dcloud_appkey</label>
             <input
               :value="selected.dcloudAppkey"
+              placeholder="32位，从 dev.dcloud.net.cn 应用详情获取"
               @input="updateField('dcloudAppkey', $event.target.value)"
             />
             <span />
@@ -666,7 +806,7 @@ onMounted(async () => {
             <button class="btn" @click="browseSdk('project')">选择</button>
           </div>
 
-          <h4 class="section-title">Android 打包证书（云打包用）</h4>
+          <h4 class="section-title">Android 打包证书（云打包 / 离线正式包必填）</h4>
           <div class="form-grid">
             <label>证书类型</label>
             <select
@@ -681,16 +821,31 @@ onMounted(async () => {
 
             <label>证书别名</label>
             <input :value="selected.certAlias" @input="updateField('certAlias', $event.target.value)" />
-            <span />
+            <button type="button" class="btn btn-sm" @click="readCertMeta">读取别名</button>
 
-            <label>keystore 文件</label>
-            <input :value="selected.certFile" @input="updateField('certFile', $event.target.value)" />
-            <button class="btn" @click="browseCert">选择</button>
+            <label>签名文件</label>
+            <div
+              class="cert-drop"
+              @dragenter.prevent="onCertDragOver"
+              @dragover.prevent="onCertDragOver"
+              @drop.prevent="onCertDrop"
+              @click="browseCert"
+            >
+              <template v-if="selected.certFile">
+                <span class="cert-drop-name">{{ certFileName() }}</span>
+                <span class="cert-drop-path">{{ selected.certFile }}</span>
+              </template>
+              <template v-else>
+                拖拽 .jks / .keystore / .p12 到此处，或点击选择
+              </template>
+            </div>
+            <button type="button" class="btn" @click.stop="browseCert">选择</button>
 
             <label>证书密码</label>
             <input
               type="password"
               :value="selected.certPassword"
+              placeholder="打包用，读取别名时需与库密码一致"
               @input="updateField('certPassword', $event.target.value)"
             />
             <span />
@@ -699,94 +854,130 @@ onMounted(async () => {
             <input
               type="password"
               :value="selected.storePassword"
+              placeholder="读取别名必填；一般与证书密码相同"
               @input="updateField('storePassword', $event.target.value)"
-              placeholder="与证书密码相同可留空"
             />
             <span />
 
             <label>渠道包</label>
             <input
               :value="selected.channels"
-              placeholder="google,huawei,xiaomi..."
+              placeholder="在打包操作中勾选，或手动填写 google,huawei..."
               @input="updateField('channels', $event.target.value)"
             />
             <span />
           </div>
-          <p class="hint">自有证书需填写别名、.keystore/.jks 路径及密码；保存后到「云打包」执行打包。</p>
+          <p v-if="certHint" class="cert-hint">{{ certHint }}</p>
+          <p class="hint">
+            支持拖拽证书；填写库密码后点「读取别名」或拖入证书时自动解析别名（不读取密码文件）。
+          </p>
         </div>
 
-        <div class="card" v-if="subTab === 'local'">
-          <h3 class="section-title" style="margin-top:0;padding-top:0;border:0">项目检查</h3>
-          <ul class="check-list" v-if="offlineCheck">
-            <li :class="offlineCheck.appResources.ok ? 'ok' : 'warn'">
-              app 资源
-              <span v-if="offlineCheck.appResources.ok">✓</span>
-              <span v-else>— {{ offlineCheck.appResources.hint }}</span>
-            </li>
-            <li :class="offlineCheck.nativeProject.ok ? 'ok' : 'warn'">
-              android 源码工程
-              <span v-if="offlineCheck.nativeProject.ok">✓ {{ offlineCheck.nativeProject.path }}</span>
-              <span v-else>— {{ offlineCheck.nativeProject.hint }}</span>
-            </li>
-            <li :class="offlineCheck.offlineSdk.ok ? 'ok' : 'warn'">
-              uni-app 离线 SDK
-              <span v-if="offlineCheck.offlineSdk.ok">
-                ✓ v{{ offlineCheck.offlineSdk.version || '?' }}
-              </span>
-              <span v-else>— {{ offlineCheck.offlineSdk.error }}</span>
-            </li>
-            <li :class="offlineCheck.androidSdk?.ok ? 'ok' : 'warn'">
-              Android SDK（Gradle）
-              <span v-if="offlineCheck.androidSdk?.ok">✓ {{ offlineCheck.androidSdk.path }}</span>
-              <span v-else>— {{ offlineCheck.androidSdk?.hint }}</span>
-            </li>
-          </ul>
-          <button class="btn btn-sm" :disabled="busy" @click="refreshOfflineCheck">刷新检查</button>
-
-          <h4 class="section-title">① 生成 Android 源码工程</h4>
-          <p class="hint">
-            从离线 SDK 的 <code>HBuilder-Integrate-AS</code> 复制到项目
-            <code>native/android</code>，并写入包名、appkey、证书。SDK 版本需与 HBuilderX 一致（建议 4.87）。
-          </p>
-          <div class="actions">
-            <button class="btn btn-primary" :disabled="busy" @click="generateNative(false)">
-              生成 Android 工程
-            </button>
-            <button class="btn" :disabled="busy" @click="generateNative(true)">从 SDK 更新工程</button>
-            <button class="btn" @click="openNativeDir">打开原生工程</button>
+        <div class="card check-card" v-if="subTab === 'local'">
+          <h3 class="block-title">项目检查</h3>
+          <div class="check-tags" v-if="offlineCheck">
+            <span class="tag" :class="offlineCheck.appResources.ok ? 'ok' : 'warn'">app资源</span>
+            <span class="tag" :class="offlineCheck.nativeProject.ok ? 'ok' : 'warn'">android工程</span>
+            <span class="tag" :class="offlineCheck.offlineSdk.ok ? 'ok' : 'warn'">
+              离线SDK{{ offlineCheck.offlineSdk.version ? ' v' + offlineCheck.offlineSdk.version : '' }}
+            </span>
+            <span class="tag" :class="offlineCheck.androidSdk?.ok ? 'ok' : 'warn'">AndroidSDK</span>
+            <span class="tag" :class="offlineCheck.signing?.ok ? 'ok' : 'warn'">签名</span>
           </div>
+          <div class="link-bar">
+            <button type="button" class="link-btn" :disabled="busy" @click="refreshOfflineCheck">刷新</button>
+            <button type="button" class="link-btn" :disabled="busy" @click="generateNative(false)">生成android源码工程</button>
+            <button type="button" class="link-btn" :disabled="busy" @click="generateNative(true)">更新工程</button>
+            <button type="button" class="link-btn" @click="openNativeDir">打开原生工程</button>
+            <button type="button" class="link-btn" :disabled="busy" @click="installHxBase">安装HX本地基座</button>
+          </div>
+        </div>
 
-          <h4 class="section-title">② 打包操作</h4>
-          <div class="pack-ops">
-            <label class="inline-label">
-              <input type="checkbox" checked disabled /> android
+        <div class="card pack-card" v-if="subTab === 'local'">
+          <h3 class="block-title">打包操作</h3>
+
+          <div class="pack-row">
+            <span class="pack-label">选择平台：</span>
+            <label class="pack-option">
+              <input type="checkbox" checked disabled />
+              <span>android</span>
             </label>
-            <div class="mode-row">
-              <span>选择模式：</span>
-              <label><input v-model="offlineBuildMode" type="radio" value="debug" /> debug（基座包）</label>
-              <label><input v-model="offlineBuildMode" type="radio" value="release" /> release（正式包）</label>
-            </div>
           </div>
-          <div class="actions">
-            <button class="btn btn-primary" :disabled="busy" @click="syncOffline">同步 app 资源</button>
-            <button class="btn btn-primary" :disabled="busy" @click="startOfflinePack">开始打包</button>
-            <button class="btn" :disabled="busy" @click="buildLocal">仅编译 App 资源</button>
-            <button class="btn" @click="openOutputDir">打开资源目录</button>
-            <button class="btn" @click="openApkDir">打开 APK 目录</button>
-            <button class="btn" :disabled="busy" @click="installHxBase">安装为 HX 本地基座</button>
+
+          <div class="pack-row">
+            <span class="pack-label">选择模式：</span>
+            <label class="pack-option">
+              <input v-model="offlineBuildMode" type="radio" value="debug" />
+              <span>debug(基座包)</span>
+            </label>
+            <label class="pack-option">
+              <input v-model="offlineBuildMode" type="radio" value="release" />
+              <span>release(正式包)</span>
+            </label>
           </div>
-          <p class="hint">
-            推荐顺序：生成工程 → 同步 app 资源（含 CLI 编译 + 拷贝 www）→ 开始打包（Gradle）。需配置环境里的
-            Java、Android SDK、离线 SDK；HBuilderX 需已启动。
-          </p>
+
+          <div class="pack-row" :class="{ 'is-disabled': offlineBuildMode !== 'release' }">
+            <span class="pack-label">android渠道包：</span>
+            <label
+              v-for="ch in CHANNEL_OPTIONS"
+              :key="ch.id"
+              class="pack-option"
+            >
+              <input
+                type="checkbox"
+                :checked="isChannelOn(ch.id)"
+                :disabled="offlineBuildMode !== 'release' || busy"
+                @change="toggleChannel(ch.id)"
+              />
+              <span>{{ ch.label }}</span>
+            </label>
+          </div>
+
+          <div class="pack-toolbar">
+            <span class="pack-android-label">android:</span>
+            <button type="button" class="btn-outline" @click="viewAndroidSignature">查看android签名</button>
+            <button type="button" class="btn-outline" :disabled="busy" @click="uninstallAndInstall">
+              卸载&amp;安装
+            </button>
+            <span class="pack-vdivider" />
+            <button type="button" class="btn-solid" :disabled="busy" @click="syncOffline">同步app资源</button>
+            <button type="button" class="btn-solid" :disabled="busy" @click="startPack">开始打包</button>
+          </div>
+
+          <label class="pack-extra">
+            <input v-model="offlineSyncBeforePack" type="checkbox" />
+            <span>开始打包前同步 app 资源（首次建议勾选）</span>
+          </label>
+          <div class="link-bar">
+            <button type="button" class="link-btn" @click="openApkDir">APK目录</button>
+            <button type="button" class="link-btn" @click="openReleasePublishDir">正式包目录</button>
+            <button type="button" class="link-btn" :disabled="busy" @click="buildLocal">仅编译资源</button>
+          </div>
         </div>
 
-        <div class="card" v-if="subTab === 'cloud'">
-          <p class="hint">证书在「项目配置」中填写并保存；此处直接发起云打包。</p>
-          <div class="actions" style="margin-top: 10px">
-            <button class="btn btn-primary" :disabled="busy" @click="cloudPack">开始云打包</button>
+        <div class="card pack-card" v-if="subTab === 'cloud'">
+          <h3 class="block-title">打包操作</h3>
+          <div class="pack-row">
+            <span class="pack-label">选择平台：</span>
+            <label class="pack-option">
+              <input type="checkbox" checked disabled />
+              <span>android</span>
+            </label>
           </div>
-          <p class="hint">需先启动 HBuilderX 并登录 DCloud；打包日志见下方。</p>
+          <div class="pack-row">
+            <span class="pack-label">选择模式：</span>
+            <label class="pack-option">
+              <input type="radio" checked disabled />
+              <span>release(云打包正式版)</span>
+            </label>
+          </div>
+          <div class="pack-toolbar">
+            <span class="pack-android-label">android:</span>
+            <button type="button" class="btn-outline" @click="viewAndroidSignature">查看android签名</button>
+            <span class="pack-vdivider" />
+            <button type="button" class="btn-solid" :disabled="busy" @click="cloudPack">开始打包</button>
+          </div>
+          <p class="pack-tip">需启动 HBuilderX 并登录 DCloud；证书在「项目配置」填写。</p>
         </div>
         </div>
 
