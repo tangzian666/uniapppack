@@ -1,0 +1,46 @@
+{
+  "main": "index.html",
+  "logo": "logo.png",
+  "preload": "preload.js",
+  "name": "uniapp-pack-helper",
+  "pluginName": "uni-app打包助手",
+  "description": "轻量管理 uni-app 项目，Android 本地编译与云打包",
+  "version": "0.1.0",
+  "author": "local",
+  "pluginSetting": {
+    "single": true,
+    "height": 580
+  },
+  "features": [
+    {
+      "code": "main",
+      "explain": "uni-app Android 打包",
+      "cmds": [
+        "uni打包",
+        "uniapp打包",
+        "uni-app打包"
+      ]
+    },
+    {
+      "code": "import-manifest",
+      "explain": "从 manifest.json 导入项目",
+      "cmds": [
+        {
+          "type": "files",
+          "label": "导入 manifest.json",
+          "fileType": "file",
+          "match": "/manifest\\.json$/i",
+          "minLength": 1,
+          "maxLength": 1
+        },
+        {
+          "type": "files",
+          "label": "导入 uni-app 项目目录",
+          "fileType": "directory",
+          "minLength": 1,
+          "maxLength": 1
+        }
+      ]
+    }
+  ]
+}
