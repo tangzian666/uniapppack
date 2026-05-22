@@ -1,5 +1,7 @@
 # uni-app Android 打包助手（uTools）
 
+> iOS 基座 / 正式包规划见：[ios-pack-roadmap.md](./ios-pack-roadmap.md)
+
 ## 与参考插件「uniapp应用开发工具」配置对照
 
 | 参考插件配置 | 本插件 | 状态 |
